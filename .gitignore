@@ -2,3 +2,5 @@
 **/*.rs.bk
 Cargo.lock
 /_tmp_filetree/
+/.issuelist/
+.DS_Store
