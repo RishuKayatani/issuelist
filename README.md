@@ -1,5 +1,7 @@
 # issuelist
 
+[English README](README.en.md)
+
 GitHub Issue を TUI で一覧・プレビューする CLI ツールです。現在のディレクトリの Git リポジトリに紐づく Open Issue を表示し、本文とコメントをプレビューできます。
 
 ## 特徴
