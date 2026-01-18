@@ -4,3 +4,6 @@ Cargo.lock
 /_tmp_filetree/
 /.issuelist/
 .DS_Store
+spec/
+doc/
+exec_plans/
