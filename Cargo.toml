@@ -4,7 +4,12 @@ version = "0.1.0"
 edition = "2021"
 
 authors = ["rk"]
+description = "TUI for browsing GitHub issues with preview"
 license = "MIT"
+repository = "https://github.com/RishuKayatani/issuelist"
+readme = "README.md"
+keywords = ["tui", "github", "issues", "cli"]
+categories = ["command-line-utilities"]
 
 [[bin]]
 name = "issuelist"
