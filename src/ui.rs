@@ -68,12 +68,25 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         })
         .collect();
 
-    let list_title = if app.focus == crate::app::Focus::List { "Open *" } else { "Open" };
+    let list_focus = if app.focus == crate::app::Focus::List { "*" } else { "" };
+    let list_spin = if app.list_loading { app.spinner_char().to_string() } else { String::new() };
+    let list_title = if list_spin.is_empty() {
+        format!("Open {}", list_focus).trim_end().to_string()
+    } else {
+        format!("Open {} {}", list_focus, list_spin).trim_end().to_string()
+    };
     let list = List::new(list_items)
         .block(Block::default().borders(Borders::ALL).title(list_title));
     frame.render_widget(list, chunks[0]);
 
-    let preview_title = if app.focus == crate::app::Focus::Preview { "Preview *" } else { "Preview" };
+    let preview_focus = if app.focus == crate::app::Focus::Preview { "*" } else { "" };
+    let preview_loading = app.selected_issue_number().map(|n| app.pending_details.contains(&n)).unwrap_or(false);
+    let preview_spin = if preview_loading { app.spinner_char().to_string() } else { String::new() };
+    let preview_title = if preview_spin.is_empty() {
+        format!("Preview {}", preview_focus).trim_end().to_string()
+    } else {
+        format!("Preview {} {}", preview_focus, preview_spin).trim_end().to_string()
+    };
     let right_block = Block::default().borders(Borders::ALL).title(preview_title);
     let raw_lines = if let Some(err) = app.error.as_deref() {
         vec![err.to_string()]
@@ -82,12 +95,10 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
         .and_then(|num| app.detail_cache.get(&num))
     {
         render_detail(detail)
-    } else if let Some(number) = app.loading {
-        vec![format!("Loading issue #{number}...")]
     } else if app.issues.is_empty() {
         vec!["No open issues".to_string()]
     } else {
-        vec!["Select an issue".to_string()]
+        vec![String::new()]
     };
 
     let visible_width = chunks[1].width.saturating_sub(2) as usize;

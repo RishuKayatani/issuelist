@@ -6,6 +6,8 @@ mod repo;
 mod ui;
 
 use std::io;
+use std::sync::mpsc;
+use std::thread;
 use std::time::Duration;
 
 use anyhow::Result;
@@ -18,6 +20,49 @@ use ratatui::prelude::*;
 
 use app::App;
 
+
+#[derive(Debug)]
+enum WorkerReq {
+    FetchList { owner: String, repo: String },
+    FetchDetail { owner: String, repo: String, number: u64 },
+}
+
+#[derive(Debug)]
+enum WorkerMsg {
+    ListReady { issues: Vec<github::Issue> },
+    DetailReady { number: u64, detail: github::IssueDetail },
+    Error { message: String },
+}
+
+fn spawn_worker(tx: mpsc::Sender<WorkerMsg>, rx: mpsc::Receiver<WorkerReq>) -> thread::JoinHandle<()> {
+    thread::spawn(move || {
+        for req in rx {
+            match req {
+                WorkerReq::FetchList { owner, repo } => {
+                    match github::fetch_open_issues(&owner, &repo) {
+                        Ok(list) => {
+                            let _ = tx.send(WorkerMsg::ListReady { issues: list });
+                        }
+                        Err(err) => {
+                            let _ = tx.send(WorkerMsg::Error { message: err.to_string() });
+                        }
+                    }
+                }
+                WorkerReq::FetchDetail { owner, repo, number } => {
+                    match github::fetch_issue_detail(&owner, &repo, number) {
+                        Ok(detail) => {
+                            let _ = tx.send(WorkerMsg::DetailReady { number, detail });
+                        }
+                        Err(err) => {
+                            let _ = tx.send(WorkerMsg::Error { message: err.to_string() });
+                        }
+                    }
+                }
+            }
+        }
+    })
+}
+
 fn main() -> Result<()> {
     let (owner, repo_name) = match repo::current_repo() {
         Ok(repo) => repo,
@@ -26,6 +71,13 @@ fn main() -> Result<()> {
             return Ok(());
         }
     };
+
+    let owner_name = owner.clone();
+    let repo_name_copy = repo_name.clone();
+
+    let (tx_req, rx_req) = mpsc::channel();
+    let (tx_msg, rx_msg) = mpsc::channel();
+    let _worker = spawn_worker(tx_msg, rx_req);
 
     let issues = match cache::read_issues() {
         Ok(cached) => cached,
@@ -50,8 +102,15 @@ fn main() -> Result<()> {
 
     let mut app = App::new();
     app.issues = issues;
+    if !app.issues.is_empty() {
+        app.list_loading = true;
+        let _ = tx_req.send(WorkerReq::FetchList {
+            owner: owner_name.clone(),
+            repo: repo_name_copy.clone(),
+        });
+    }
 
-    let result = run_app(&mut terminal, &mut app, &owner, &repo_name);
+    let result = run_app(&mut terminal, &mut app, &owner, &repo_name, rx_msg, tx_req);
 
     disable_raw_mode()?;
     execute!(
@@ -73,9 +132,12 @@ fn run_app<B: Backend>(
     app: &mut App,
     owner: &str,
     repo_name: &str,
+    rx: mpsc::Receiver<WorkerMsg>,
+    tx: mpsc::Sender<WorkerReq>,
 ) -> io::Result<()> {
     loop {
-        ensure_detail(app, owner, repo_name);
+        handle_background(app, owner, repo_name, &tx);
+        drain_worker(app, &rx);
         if let Ok(size) = terminal.size() {
             let preview_height = size.height.saturating_sub(2) as usize;
             app.preview_max_lines = app.preview_max_lines.max(preview_height);
@@ -102,33 +164,76 @@ fn run_app<B: Backend>(
     Ok(())
 }
 
-fn ensure_detail(app: &mut App, owner: &str, repo_name: &str) {
+fn ensure_detail(app: &mut App, owner: &str, repo_name: &str, tx: &mpsc::Sender<WorkerReq>) {
     let Some(number) = app.selected_issue_number() else { return; };
-    if app.last_attempted == Some(number) {
+    if app.pending_details.contains(&number) {
         return;
     }
     if app.detail_cache.contains_key(&number) {
-        app.loading = None;
         return;
     }
-
     if let Ok(detail) = cache::read_detail(number) {
         app.detail_cache.insert(number, detail);
-        app.loading = None;
-        return;
+        // 背景更新は続けるが、表示は即キャッシュを使う
     }
+    if !app.pending_details.contains(&number) {
+        app.pending_details.insert(number);
+        let _ = tx.send(WorkerReq::FetchDetail {
+            owner: owner.to_string(),
+            repo: repo_name.to_string(),
+            number,
+        });
+    }
+}
 
-    app.last_attempted = Some(number);
-    app.loading = Some(number);
-    match github::fetch_issue_detail(owner, repo_name, number) {
-        Ok(detail) => {
-            let _ = cache::write_detail(number, &detail);
-            app.detail_cache.insert(number, detail);
-            app.loading = None;
-        }
-        Err(err) => {
-            app.set_error(err.to_string());
-            app.loading = None;
+fn handle_background(app: &mut App, owner: &str, repo_name: &str, tx: &mpsc::Sender<WorkerReq>) {
+    app.tick_spinner();
+    if app.reload_requested {
+        app.reload_requested = false;
+        app.list_loading = true;
+        let _ = tx.send(WorkerReq::FetchList {
+            owner: owner.to_string(),
+            repo: repo_name.to_string(),
+        });
+    }
+    if let Some(number) = app.selected_issue_number() {
+        app.last_selected = Some(number);
+        ensure_detail(app, owner, repo_name, tx);
+    }
+}
+
+fn drain_worker(app: &mut App, rx: &mpsc::Receiver<WorkerMsg>) {
+    while let Ok(msg) = rx.try_recv() {
+        match msg {
+            WorkerMsg::ListReady { issues } => {
+                app.list_loading = false;
+                let prev_number = app.selected_issue_number();
+                app.issues = issues.clone();
+                if let Some(num) = prev_number {
+                    if let Some(idx) = app.issues.iter().position(|i| i.number == num) {
+                        app.selected = idx;
+                    } else {
+                        app.selected = 0;
+                    }
+                } else {
+                    app.selected = 0;
+                }
+                app.list_scroll = 0;
+                app.preview_scroll = 0;
+                app.preview_hscroll = 0;
+                app.pending_details.clear();
+                app.error = None;
+                let _ = cache::write_issues(&issues);
+            }
+            WorkerMsg::DetailReady { number, detail } => {
+                app.pending_details.remove(&number);
+                app.detail_cache.insert(number, detail.clone());
+                let _ = cache::write_detail(number, &detail);
+            }
+            WorkerMsg::Error { message } => {
+                app.list_loading = false;
+                app.set_error(message);
+            }
         }
     }
 }

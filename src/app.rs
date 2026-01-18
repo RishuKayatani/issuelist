@@ -1,4 +1,5 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
+use std::time::Instant;
 
 use crate::github::{Issue, IssueDetail};
 
@@ -9,15 +10,13 @@ pub enum Focus {
     Preview,
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct App {
     pub should_quit: bool,
     pub issues: Vec<Issue>,
     pub error: Option<String>,
     pub selected: usize,
     pub detail_cache: HashMap<u64, IssueDetail>,
-    pub last_attempted: Option<u64>,
-    pub loading: Option<u64>,
     pub list_scroll: usize,
     pub preview_scroll: usize,
     pub preview_max_lines: usize,
@@ -26,6 +25,12 @@ pub struct App {
     pub wrap_enabled: bool,
     pub list_hscroll: usize,
     pub preview_hscroll: usize,
+    pub reload_requested: bool,
+    pub list_loading: bool,
+    pub pending_details: HashSet<u64>,
+    pub spinner_index: usize,
+    pub last_spinner_tick: Instant,
+    pub last_selected: Option<u64>,
 }
 
 impl App {
@@ -36,8 +41,6 @@ impl App {
             error: None,
             selected: 0,
             detail_cache: HashMap::new(),
-            last_attempted: None,
-            loading: None,
             list_scroll: 0,
             preview_scroll: 0,
             preview_max_lines: 0,
@@ -46,6 +49,12 @@ impl App {
             wrap_enabled: true,
             list_hscroll: 0,
             preview_hscroll: 0,
+            reload_requested: false,
+            list_loading: false,
+            pending_details: HashSet::new(),
+            spinner_index: 0,
+            last_spinner_tick: Instant::now(),
+            last_selected: None,
         }
     }
 
@@ -57,7 +66,6 @@ impl App {
         if self.selected > 0 {
             self.selected -= 1;
             self.error = None;
-            self.last_attempted = None;
             self.preview_scroll = 0;
         }
     }
@@ -66,7 +74,6 @@ impl App {
         if self.selected + 1 < self.issues.len() {
             self.selected += 1;
             self.error = None;
-            self.last_attempted = None;
             self.preview_scroll = 0;
         }
     }
@@ -80,6 +87,19 @@ impl App {
             Focus::List => Focus::Preview,
             Focus::Preview => Focus::List,
         };
+    }
+
+    pub fn spinner_char(&self) -> char {
+        let frames = ['-', '\\', '|', '/'];
+        frames[self.spinner_index % frames.len()]
+    }
+
+    pub fn tick_spinner(&mut self) {
+        let now = Instant::now();
+        if now.duration_since(self.last_spinner_tick).as_millis() >= 120 {
+            self.spinner_index = (self.spinner_index + 1) % 4;
+            self.last_spinner_tick = now;
+        }
     }
 
     pub fn toggle_wrap(&mut self) {

@@ -59,3 +59,4 @@ pub fn read_detail(number: u64) -> anyhow::Result<IssueDetail> {
 fn detail_path(root: &Path, number: u64) -> PathBuf {
     root.join(DETAIL_DIR).join(format!("{number}.json"))
 }
+

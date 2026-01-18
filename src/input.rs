@@ -5,6 +5,7 @@ use crate::app::{App, Focus};
 pub fn handle_key_event(app: &mut App, key: KeyEvent) {
     match key.code {
         KeyCode::Char('q') => app.should_quit = true,
+        KeyCode::Char('r') | KeyCode::F(5) => app.reload_requested = true,
         KeyCode::Enter => app.toggle_focus(),
         KeyCode::Up => {
             if app.focus == Focus::List {
