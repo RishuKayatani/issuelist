@@ -5,6 +5,7 @@ use ratatui::{
     widgets::{Block, Borders, List, ListItem, Paragraph},
     Frame,
 };
+use unicode_width::UnicodeWidthChar;
 
 use crate::app::App;
 
@@ -12,11 +13,25 @@ fn apply_hscroll(text: &str, offset: usize, max_width: usize) -> String {
     if max_width == 0 {
         return String::new();
     }
-    let mut chars = text.chars().skip(offset).take(max_width).collect::<String>();
-    if chars.len() < max_width {
-        chars.push_str(&" ".repeat(max_width - chars.len()));
+    let mut skipped = 0;
+    let mut out_width = 0;
+    let mut out = String::new();
+    for ch in text.chars() {
+        let w = UnicodeWidthChar::width(ch).unwrap_or(0);
+        if skipped + w <= offset {
+            skipped += w;
+            continue;
+        }
+        if out_width + w > max_width {
+            break;
+        }
+        out.push(ch);
+        out_width += w;
+        if out_width == max_width {
+            break;
+        }
     }
-    chars
+    out
 }
 
 pub fn draw(frame: &mut Frame, app: &mut App) {
@@ -63,7 +78,10 @@ pub fn draw(frame: &mut Frame, app: &mut App) {
             ListItem::new(Line::from(vec![
                 Span::styled(format!("#{}", issue.number), Style::default().fg(Color::Yellow)),
                 Span::raw(" "),
-                Span::styled(apply_hscroll(issue.title.as_str(), app.list_hscroll, chunks[0].width.saturating_sub(8) as usize), style),
+                Span::styled(
+                    apply_hscroll(issue.title.as_str(), app.list_hscroll, chunks[0].width.saturating_sub(8) as usize),
+                    style,
+                ),
             ]))
         })
         .collect();
@@ -152,11 +170,20 @@ fn wrap_lines(lines: &[String], width: usize) -> Vec<String> {
             continue;
         }
         let mut current = String::new();
+        let mut current_width = 0;
         for ch in line.chars() {
-            current.push(ch);
-            if current.chars().count() >= width {
+            let w = UnicodeWidthChar::width(ch).unwrap_or(0);
+            if current_width + w > width && !current.is_empty() {
                 out.push(current);
                 current = String::new();
+                current_width = 0;
+            }
+            current.push(ch);
+            current_width += w;
+            if current_width >= width {
+                out.push(current);
+                current = String::new();
+                current_width = 0;
             }
         }
         if !current.is_empty() {
