@@ -186,6 +186,22 @@ fn ensure_detail(app: &mut App, owner: &str, repo_name: &str, tx: &mpsc::Sender<
     }
 }
 
+fn force_reload_selected_detail(
+    app: &mut App,
+    owner: &str,
+    repo_name: &str,
+    tx: &mpsc::Sender<WorkerReq>,
+) {
+    let Some(number) = app.selected_issue_number() else { return; };
+    app.pending_details.remove(&number);
+    app.detail_cache.remove(&number);
+    let _ = tx.send(WorkerReq::FetchDetail {
+        owner: owner.to_string(),
+        repo: repo_name.to_string(),
+        number,
+    });
+}
+
 fn handle_background(app: &mut App, owner: &str, repo_name: &str, tx: &mpsc::Sender<WorkerReq>) {
     app.tick_spinner();
     if app.reload_requested {
@@ -195,6 +211,10 @@ fn handle_background(app: &mut App, owner: &str, repo_name: &str, tx: &mpsc::Sen
             owner: owner.to_string(),
             repo: repo_name.to_string(),
         });
+    }
+    if app.preview_reload_requested {
+        app.preview_reload_requested = false;
+        force_reload_selected_detail(app, owner, repo_name, tx);
     }
     if let Some(number) = app.selected_issue_number() {
         app.last_selected = Some(number);

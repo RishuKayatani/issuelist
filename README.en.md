@@ -41,6 +41,7 @@ Run inside a Git repository to show its open issues.
 - `g`/`G`: Top/bottom
 - `w`: Toggle wrap
 - `r`/`F5`: Reload
+- `R`: Force preview reload
 - `q`: Quit
 
 ## Cache
