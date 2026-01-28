@@ -5,6 +5,8 @@ pub struct Issue {
     pub number: u64,
     pub title: String,
     pub created_at: String,
+    #[serde(default)]
+    pub pull_request: Option<serde_json::Value>,
 }
 
 #[derive(Debug, serde::Deserialize, serde::Serialize, Clone)]
@@ -63,6 +65,7 @@ pub fn fetch_open_issues(owner: &str, repo_name: &str) -> anyhow::Result<Vec<Iss
         "repos/{owner}/{repo_name}/issues?state=open&per_page=100&sort=created&direction=asc",
     );
     let mut issues: Vec<Issue> = gh_json(&endpoint)?;
+    issues.retain(|issue| issue.pull_request.is_none());
     issues.sort_by(|a, b| a.created_at.cmp(&b.created_at));
     Ok(issues)
 }
